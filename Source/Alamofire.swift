@@ -330,7 +330,7 @@ public class Manager {
             dataTask = self.session.dataTaskWithRequest(URLRequest.URLRequest)
         }
 
-        let request = Request(session: session, task: dataTask!)
+        let request = self.requestForSession(session, dataTask: dataTask!)
         delegate[request.delegate.task] = request.delegate
 
         if startRequestsImmediately {
@@ -339,6 +339,11 @@ public class Manager {
 
         return request
     }
+
+    public func requestForSession(session: NSURLSession, dataTask: NSURLSessionDataTask?) -> Request {
+      return Request(session: session, task: dataTask!)
+    }
+
 
     class SessionDelegate: NSObject, NSURLSessionDelegate, NSURLSessionTaskDelegate, NSURLSessionDataDelegate, NSURLSessionDownloadDelegate {
         private var subdelegates: [Int: Request.TaskDelegate]
@@ -524,6 +529,11 @@ public class Manager {
     }
 }
 
+public struct GenericSerializer<N> {
+  public let f: (NSURLRequest, NSHTTPURLResponse?, NSData?) -> (N?, NSError?)
+  public init(function: (NSURLRequest, NSHTTPURLResponse?, NSData?) -> (N?, NSError?)) { f = function }
+}
+
 // MARK: -
 
 /**
@@ -547,7 +557,7 @@ public class Request {
     /// The progress of the request lifecycle.
     public var progress: NSProgress? { return delegate.progress }
 
-    private init(session: NSURLSession, task: NSURLSessionTask) {
+    public init(session: NSURLSession, task: NSURLSessionTask) {
         self.session = session
 
         switch task {
@@ -664,6 +674,19 @@ public class Request {
 
         return self
     }
+
+    public func response<N>(queue: dispatch_queue_t? = nil, serializer: GenericSerializer<N>, completionHandler: (NSURLRequest, NSHTTPURLResponse?, N?, NSError?) -> Void) -> Self {
+      dispatch_async(delegate.queue) {
+        let (responseObject: N?, serializationError: NSError?) = serializer.f(self.request, self.response, self.delegate.data)
+
+        dispatch_async(queue ?? dispatch_get_main_queue()) {
+          completionHandler(self.request, self.response, responseObject, self.delegate.error ?? serializationError)
+        }
+      }
+
+      return self
+    }
+
 
     /**
         Suspends the request.
